@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useMutation } from "@tanstack/react-query";
 import { requestOtp, verifyOtp } from "../api/auth";
 import { useAuth } from "../hooks/useAuth";
 
 type Step = "mobile" | "otp";
+
+const RESEND_SECONDS = 30;
 
 export default function Login() {
   const navigate = useNavigate();
@@ -16,13 +18,29 @@ export default function Login() {
   const [name, setName] = useState("");
   const [isNewUser, setIsNewUser] = useState(false);
   const [otp, setOtp] = useState<string | undefined>();
+  const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [resendIn, setResendIn] = useState(0);
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const id = setInterval(() => {
+      setResendIn((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [resendIn]);
 
   const otpMutation = useMutation({
     mutationFn: requestOtp,
     onSuccess: (data) => {
+      setErrorMessage(undefined);
       setIsNewUser(data.isNewUser);
       setOtp(data.otp);
+      setCode("");
       setStep("otp");
+      setResendIn(RESEND_SECONDS);
+    },
+    onError: (error: any) => {
+      setErrorMessage(error?.response?.data?.message ?? "Something went wrong");
     },
   });
 
@@ -32,6 +50,23 @@ export default function Login() {
       login(data.accessToken);
       navigate("/dashboard");
     },
+    onError: (error: any) => {
+      const msg: string = error?.response?.data?.message ?? "";
+      setErrorMessage(msg || "Something went wrong");
+
+      const otpDead =
+        msg.includes("Too many incorrect attempts") ||
+        msg.includes("No active OTP") ||
+        msg.includes("expired");
+
+      if (otpDead) {
+        setStep("mobile");
+        setCode("");
+        setOtp(undefined);
+        setResendIn(0);
+        setTimeout(() => setErrorMessage(undefined), 2500);
+      }
+    },
   });
 
   const handleRequestOtp = () => {
@@ -39,21 +74,21 @@ export default function Login() {
     otpMutation.mutate(mobile);
   };
 
+  const handleResend = () => {
+    if (resendIn > 0) return;
+    otpMutation.mutate(mobile);
+  };
+
   const handleVerify = () => {
     verifyMutation.mutate({ mobile, code, ...(isNewUser ? { name } : {}) });
   };
 
-  const errorMessage =
-    (otpMutation.error as any)?.response?.data?.message ||
-    (verifyMutation.error as any)?.response?.data?.message;
-
   return (
     <div className="min-h-screen w-full bg-neutral-950 text-neutral-100 flex items-center justify-center p-6 relative overflow-hidden">
-      {/* ambient glow */}
       <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-128 w-lg rounded-full bg-linear-to-br from-amber-500/20 to-rose-500/10 blur-3xl" />
 
       <div className="relative w-full max-w-md">
-        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/60 p-8 backdrop-blur-xl shadow-2xl shadow-black/40">
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/60 p-6 sm:p-8 backdrop-blur-xl shadow-2xl shadow-black/40">
           <h1 className="text-2xl font-semibold tracking-tight">
             {step === "mobile" ? "Sign in" : "Enter code"}
           </h1>
@@ -78,7 +113,10 @@ export default function Login() {
                     maxLength={10}
                     placeholder="98765 43210"
                     value={mobile}
-                    onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    onChange={(e) => {
+                      setMobile(e.target.value.replace(/\D/g, "").slice(0, 10));
+                      setErrorMessage(undefined);
+                    }}
                     onKeyDown={(e) => e.key === "Enter" && handleRequestOtp()}
                     className="w-full bg-transparent py-3.5 pr-4 text-base tracking-wide outline-none placeholder:text-neutral-600"
                   />
@@ -108,15 +146,23 @@ export default function Login() {
                   maxLength={6}
                   placeholder="••••••"
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onChange={(e) => {
+                    setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    setErrorMessage(undefined);
+                  }}
                   onKeyDown={(e) => e.key === "Enter" && code.length === 6 && handleVerify()}
                   className="w-full rounded-xl border border-neutral-700 bg-neutral-950/60 py-3.5 text-center text-2xl font-semibold tracking-[0.5em] outline-none transition focus:border-amber-400/60 focus:ring-2 focus:ring-amber-400/15 placeholder:tracking-[0.5em] placeholder:text-neutral-700"
                 />
                 {otp && (
-                  <p className="mt-2 text-center text-sm text-neutral-400">
+                  <button
+                    type="button"
+                    onClick={() => setCode(otp)}
+                    className="mt-2 w-full text-center text-sm text-neutral-400 transition hover:text-amber-200"
+                  >
                     Your OTP is{" "}
-                    <span className="font-semibold tracking-widest text-amber-300">{otp}</span>
-                  </p>
+                    <span className="font-semibold tracking-widest text-amber-300">{otp}</span> ·
+                    tap to fill
+                  </button>
                 )}
               </div>
 
@@ -147,17 +193,32 @@ export default function Login() {
                 {verifyMutation.isPending ? "Verifying…" : "Verify & continue"}
               </button>
 
-              <button
-                onClick={() => {
-                  setStep("mobile");
-                  setCode("");
-                  setName("");
-                  setOtp(undefined);
-                }}
-                className="w-full text-sm text-neutral-500 transition hover:text-neutral-300"
-              >
-                ← Use a different number
-              </button>
+              <div className="flex items-center justify-between text-sm">
+                <button
+                  onClick={() => {
+                    setStep("mobile");
+                    setCode("");
+                    setName("");
+                    setOtp(undefined);
+                    setErrorMessage(undefined);
+                    setResendIn(0);
+                  }}
+                  className="text-neutral-500 transition hover:text-neutral-300"
+                >
+                  ← Change number
+                </button>
+                <button
+                  onClick={handleResend}
+                  disabled={resendIn > 0 || otpMutation.isPending}
+                  className="text-amber-300/80 transition hover:text-amber-200 disabled:opacity-40 disabled:hover:text-amber-300/80"
+                >
+                  {otpMutation.isPending
+                    ? "Resending…"
+                    : resendIn > 0
+                      ? `Resend in ${resendIn}s`
+                      : "Resend OTP"}
+                </button>
+              </div>
             </div>
           )}
 
