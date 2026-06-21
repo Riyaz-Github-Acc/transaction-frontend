@@ -21,13 +21,6 @@ export default function Wallet() {
   const { data: user } = useUser();
   const balance = Number(user?.wallet?.balance ?? 0);
 
-  const onTxnSuccess = () => {
-    queryClient.invalidateQueries({ queryKey: ["me"] });
-    queryClient.invalidateQueries({ queryKey: ["passbook"] });
-    setAmount("");
-    setAction(null);
-  };
-
   const addMutation = useMutation({
     mutationFn: addMoney,
     onSuccess: (_data, amount) => {
