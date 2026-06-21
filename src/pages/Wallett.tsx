@@ -3,8 +3,10 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addMoney, withdraw, getPassbook } from "../api/wallet";
 import { useUser } from "../hooks/useUser";
+import toast from "react-hot-toast";
 
 type Tab = "manage" | "passbook";
+type Action = "add" | "withdraw" | null;
 
 export default function Wallet() {
   const navigate = useNavigate();
@@ -13,20 +15,46 @@ export default function Wallet() {
 
   const initialTab: Tab = searchParams.get("tab") === "passbook" ? "passbook" : "manage";
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [action, setAction] = useState<Action>(null);
   const [amount, setAmount] = useState("");
 
   const { data: user } = useUser();
   const balance = Number(user?.wallet?.balance ?? 0);
 
-  // refresh both balance (me) and passbook after any transaction
   const onTxnSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ["me"] });
     queryClient.invalidateQueries({ queryKey: ["passbook"] });
     setAmount("");
+    setAction(null);
   };
 
-  const addMutation = useMutation({ mutationFn: addMoney, onSuccess: onTxnSuccess });
-  const withdrawMutation = useMutation({ mutationFn: withdraw, onSuccess: onTxnSuccess });
+  const addMutation = useMutation({
+    mutationFn: addMoney,
+    onSuccess: (_data, amount) => {
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+      queryClient.invalidateQueries({ queryKey: ["passbook"] });
+      toast.success(`₹${Number(amount).toLocaleString("en-IN")} added to your wallet`);
+      setAmount("");
+      setAction(null);
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message ?? "Failed to add money");
+    },
+  });
+
+  const withdrawMutation = useMutation({
+    mutationFn: withdraw,
+    onSuccess: (_data, amount) => {
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+      queryClient.invalidateQueries({ queryKey: ["passbook"] });
+      toast.success(`₹${Number(amount).toLocaleString("en-IN")} withdrawn from your wallet`);
+      setAmount("");
+      setAction(null);
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message ?? "Withdrawal failed");
+    },
+  });
 
   const passbookQuery = useQuery({
     queryKey: ["passbook"],
@@ -35,16 +63,28 @@ export default function Wallet() {
 
   const numericAmount = Number(amount);
   const isValidAmount = numericAmount > 0 && numericAmount <= 1000000;
+  const isWithdraw = action === "withdraw";
+  const exceedsBalance = isWithdraw && numericAmount > balance;
 
-  const txnError =
-    (addMutation.error as any)?.response?.data?.message ||
-    (withdrawMutation.error as any)?.response?.data?.message;
+  const activeMutation = isWithdraw ? withdrawMutation : addMutation;
+  const txnError = (activeMutation.error as any)?.response?.data?.message;
+
+  const handleSubmit = () => {
+    if (!isValidAmount || exceedsBalance) return;
+    activeMutation.mutate(numericAmount);
+  };
+
+  const resetAction = () => {
+    setAction(null);
+    setAmount("");
+    addMutation.reset();
+    withdrawMutation.reset();
+  };
 
   return (
     <div className="min-h-screen w-full bg-neutral-950 text-neutral-100">
-      {/* top bar */}
       <header className="border-b border-neutral-800 bg-neutral-900/40 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
           <button
             onClick={() => navigate("/dashboard")}
             className="text-sm text-neutral-400 transition hover:text-white"
@@ -56,20 +96,26 @@ export default function Wallet() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-6 py-8 space-y-6">
+      <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8 space-y-4 sm:space-y-6">
         {/* balance */}
-        <section className="rounded-3xl border border-neutral-800 bg-linear-to-br from-neutral-900 to-neutral-900/40 p-7">
+        <section className="rounded-3xl border border-neutral-800 bg-linear-to-br from-neutral-900 to-neutral-900/40 p-5 sm:p-7">
           <p className="text-xs font-medium uppercase tracking-wider text-neutral-500">
             Available balance
           </p>
-          <p className="mt-2 text-4xl font-semibold tracking-tight">
+          <p className="mt-2 text-3xl sm:text-4xl font-semibold tracking-tight">
             ₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
           </p>
         </section>
 
         {/* tabs */}
         <div className="flex gap-1 rounded-xl border border-neutral-800 bg-neutral-900/40 p-1">
-          <TabButton active={tab === "manage"} onClick={() => setTab("manage")}>
+          <TabButton
+            active={tab === "manage"}
+            onClick={() => {
+              setTab("manage");
+              resetAction();
+            }}
+          >
             Add / Withdraw
           </TabButton>
           <TabButton active={tab === "passbook"} onClick={() => setTab("passbook")}>
@@ -77,8 +123,46 @@ export default function Wallet() {
           </TabButton>
         </div>
 
-        {tab === "manage" && (
-          <section className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-7">
+        {tab === "manage" && action === null && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              onClick={() => setAction("add")}
+              className="group rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6 text-left transition hover:border-emerald-500/40"
+            >
+              <div className="grid h-11 w-11 place-items-center rounded-full bg-emerald-500/15 text-xl font-bold text-emerald-400">
+                +
+              </div>
+              <p className="mt-4 text-lg font-semibold">Add money</p>
+              <p className="mt-0.5 text-sm text-neutral-500">Top up your wallet balance</p>
+            </button>
+
+            <button
+              onClick={() => setAction("withdraw")}
+              className="group rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6 text-left transition hover:border-rose-500/40"
+            >
+              <div className="grid h-11 w-11 place-items-center rounded-full bg-rose-500/15 text-xl font-bold text-rose-400">
+                −
+              </div>
+              <p className="mt-4 text-lg font-semibold">Withdraw</p>
+              <p className="mt-0.5 text-sm text-neutral-500">Transfer money out of your wallet</p>
+            </button>
+          </div>
+        )}
+
+        {tab === "manage" && action !== null && (
+          <section className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-7">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">
+                {isWithdraw ? "Withdraw money" : "Add money"}
+              </h2>
+              <button
+                onClick={resetAction}
+                className="text-sm text-neutral-500 transition hover:text-neutral-300"
+              >
+                ← Back
+              </button>
+            </div>
+
             <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-neutral-500">
               Amount
             </label>
@@ -87,14 +171,15 @@ export default function Wallet() {
               <input
                 type="number"
                 inputMode="decimal"
+                autoFocus
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
                 className="w-full bg-transparent py-3.5 pr-4 text-lg outline-none placeholder:text-neutral-600"
               />
             </div>
 
-            {/* quick amounts */}
             <div className="mt-3 flex flex-wrap gap-2">
               {[100, 500, 1000, 2000].map((v) => (
                 <button
@@ -107,28 +192,27 @@ export default function Wallet() {
               ))}
             </div>
 
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <button
-                onClick={() => addMutation.mutate(numericAmount)}
-                disabled={!isValidAmount || addMutation.isPending}
-                className="rounded-xl bg-linear-to-br from-emerald-400 to-teal-500 py-3.5 font-semibold text-neutral-950 transition hover:opacity-90 active:scale-[0.99] disabled:opacity-30"
-              >
-                {addMutation.isPending ? "Adding…" : "Add money"}
-              </button>
-              <button
-                onClick={() => withdrawMutation.mutate(numericAmount)}
-                disabled={!isValidAmount || numericAmount > balance || withdrawMutation.isPending}
-                className="rounded-xl border border-neutral-700 py-3.5 font-semibold text-neutral-100 transition hover:border-neutral-500 active:scale-[0.99] disabled:opacity-30"
-              >
-                {withdrawMutation.isPending ? "Withdrawing…" : "Withdraw"}
-              </button>
-            </div>
-
-            {numericAmount > balance && amount !== "" && (
-              <p className="mt-3 text-xs text-amber-400">
-                Amount exceeds your available balance for withdrawal.
-              </p>
+            {exceedsBalance && amount !== "" && (
+              <p className="mt-3 text-xs text-amber-400">Amount exceeds your available balance.</p>
             )}
+
+            <button
+              onClick={handleSubmit}
+              disabled={!isValidAmount || exceedsBalance || activeMutation.isPending}
+              className={`mt-6 w-full rounded-xl py-3.5 font-semibold text-neutral-950 transition hover:opacity-90 active:scale-[0.99] disabled:opacity-30 ${
+                isWithdraw
+                  ? "bg-linear-to-br from-rose-400 to-orange-500"
+                  : "bg-linear-to-br from-emerald-400 to-teal-500"
+              }`}
+            >
+              {activeMutation.isPending
+                ? isWithdraw
+                  ? "Withdrawing…"
+                  : "Adding…"
+                : isWithdraw
+                  ? "Withdraw"
+                  : "Add money"}
+            </button>
 
             {txnError && (
               <div className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
