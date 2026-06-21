@@ -86,14 +86,3 @@ npm run preview    # preview the production build locally
 ```
 
 ---
-
-## Deployment (Netlify)
-
-- **Build command:** `npm run build`
-- **Publish directory:** `dist`
-- Set `VITE_API_URL` in Netlify environment variables to the deployed backend URL
-- For client-side routing, add a redirect (`public/_redirects`):
-
-  ```
-  /*  /index.html  200
-  ```
