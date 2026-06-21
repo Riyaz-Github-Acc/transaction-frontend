@@ -15,11 +15,13 @@ export default function Login() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [isNewUser, setIsNewUser] = useState(false);
+  const [otp, setOtp] = useState<string | undefined>();
 
   const otpMutation = useMutation({
     mutationFn: requestOtp,
     onSuccess: (data) => {
       setIsNewUser(data.isNewUser);
+      setOtp(data.otp);
       setStep("otp");
     },
   });
@@ -110,6 +112,12 @@ export default function Login() {
                   onKeyDown={(e) => e.key === "Enter" && code.length === 6 && handleVerify()}
                   className="w-full rounded-xl border border-neutral-700 bg-neutral-950/60 py-3.5 text-center text-2xl font-semibold tracking-[0.5em] outline-none transition focus:border-amber-400/60 focus:ring-2 focus:ring-amber-400/15 placeholder:tracking-[0.5em] placeholder:text-neutral-700"
                 />
+                {otp && (
+                  <p className="mt-2 text-center text-sm text-neutral-400">
+                    Your OTP is{" "}
+                    <span className="font-semibold tracking-widest text-amber-300">{otp}</span>
+                  </p>
+                )}
               </div>
 
               {isNewUser && (
@@ -144,6 +152,7 @@ export default function Login() {
                   setStep("mobile");
                   setCode("");
                   setName("");
+                  setOtp(undefined);
                 }}
                 className="w-full text-sm text-neutral-500 transition hover:text-neutral-300"
               >
